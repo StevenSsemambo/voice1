@@ -17,15 +17,45 @@ export default function DailyCheckIn({ onComplete, ageGroup = 'explorer' }) {
   const [fluxMsg, setFluxMsg]   = useState('')
   const [done, setDone]         = useState(false)
 
+  const today = new Date().toDateString()
+
   const handleSelect = async (mood) => {
-    haptics.select()
-    setSelected(mood)
-    const msg = getOfflineResponse(mood.response)
-    setFluxMsg(msg)
-    speakFlux(msg, ageGroup)
-    await setSetting('today_mood', mood.id)
-    await setSetting('today_mood_date', new Date().toDateString())
-    setTimeout(() => { setDone(true); onComplete?.(mood) }, 2200)
+    try {
+      haptics?.select?.()
+      setSelected(mood)
+
+      const msg = getOfflineResponse(mood.response)
+      setFluxMsg(msg)
+      speakFlux(msg, ageGroup)
+
+      // ✅ Save mood + date reliably
+      await setSetting('today_mood', mood.id)
+      await setSetting('today_mood_date', today)
+
+      setTimeout(() => {
+        setDone(true)
+        onComplete?.(mood)
+      }, 2200)
+
+    } catch (err) {
+      console.error('Check-in save failed:', err)
+
+      // ✅ Fail-safe: still dismiss UI
+      setDone(true)
+      onComplete?.(mood)
+    }
+  }
+
+  // ✅ FIXED: Skip now saves the date
+  const handleSkip = async () => {
+    try {
+      await setSetting('today_mood_date', today)
+    } catch (err) {
+      console.error('Skip save failed:', err)
+    }
+
+    setDone(true)
+    onComplete?.(null)
   }
 
   if (done) return null
@@ -33,6 +63,7 @@ export default function DailyCheckIn({ onComplete, ageGroup = 'explorer' }) {
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center"
       style={{ background: 'rgba(5,8,15,0.8)', backdropFilter: 'blur(12px)' }}>
+
       <div className="w-full max-w-md animate-slide-up" style={{
         background: 'linear-gradient(180deg, rgba(12,17,32,0.98) 0%, rgba(5,8,15,0.99) 100%)',
         borderRadius: '28px 28px 0 0',
@@ -40,8 +71,10 @@ export default function DailyCheckIn({ onComplete, ageGroup = 'explorer' }) {
         borderBottom: 'none',
         padding: '28px 24px 40px',
       }}>
+
         {/* Drag handle */}
-        <div className="w-10 h-1 rounded-full mx-auto mb-6" style={{ background: 'rgba(255,255,255,0.15)' }}/>
+        <div className="w-10 h-1 rounded-full mx-auto mb-6"
+          style={{ background: 'rgba(255,255,255,0.15)' }}/>
 
         <div className="flex items-center gap-3 mb-6">
           <Flux size={48} ageGroup={ageGroup} mood={selected?.fluxMood || 'happy'} floating={false}
@@ -69,8 +102,13 @@ export default function DailyCheckIn({ onComplete, ageGroup = 'explorer' }) {
                 transform: selected?.id === m.id ? 'scale(1.1)' : 'scale(1)',
               }}>
               <span style={{ fontSize:'24px', lineHeight:1 }}>{m.emoji}</span>
-              <span style={{ fontSize:'9px', fontFamily:'"Syne",sans-serif', fontWeight:600,
-                letterSpacing:'0.05em', color: selected?.id === m.id ? m.color : 'rgba(255,255,255,0.4)' }}>
+              <span style={{
+                fontSize:'9px',
+                fontFamily:'"Syne",sans-serif',
+                fontWeight:600,
+                letterSpacing:'0.05em',
+                color: selected?.id === m.id ? m.color : 'rgba(255,255,255,0.4)'
+              }}>
                 {m.label}
               </span>
             </button>
@@ -80,21 +118,35 @@ export default function DailyCheckIn({ onComplete, ageGroup = 'explorer' }) {
         {/* Flux response */}
         {fluxMsg && (
           <div className="animate-fade-in" style={{
-            padding:'12px 16px', borderRadius:'14px',
+            padding:'12px 16px',
+            borderRadius:'14px',
             background: `${selected?.color || '#22d3ee'}10`,
             border: `1px solid ${selected?.color || '#22d3ee'}25`,
           }}>
-            <p style={{ fontFamily:'"DM Sans",sans-serif', fontSize:'13px', color:'rgba(255,255,255,0.75)',
-              lineHeight:1.6, textAlign:'center' }}>
+            <p style={{
+              fontFamily:'"DM Sans",sans-serif',
+              fontSize:'13px',
+              color:'rgba(255,255,255,0.75)',
+              lineHeight:1.6,
+              textAlign:'center'
+            }}>
               {fluxMsg}
             </p>
           </div>
         )}
 
         {!selected && (
-          <button onClick={() => { setDone(true); onComplete?.(null) }}
-            style={{ background:'none', border:'none', cursor:'pointer', display:'block', margin:'12px auto 0',
-              fontFamily:'"DM Sans",sans-serif', fontSize:'12px', color:'rgba(255,255,255,0.25)' }}>
+          <button onClick={handleSkip}
+            style={{
+              background:'none',
+              border:'none',
+              cursor:'pointer',
+              display:'block',
+              margin:'12px auto 0',
+              fontFamily:'"DM Sans",sans-serif',
+              fontSize:'12px',
+              color:'rgba(255,255,255,0.25)'
+            }}>
             Skip for now
           </button>
         )}
@@ -103,18 +155,29 @@ export default function DailyCheckIn({ onComplete, ageGroup = 'explorer' }) {
   )
 }
 
-// Hook to determine if check-in should show
+
+// ✅ FIXED HOOK
 export const useCheckIn = () => {
   const [shouldShow, setShouldShow] = useState(false)
 
   useEffect(() => {
     const check = async () => {
-      const lastDate = await getSetting('today_mood_date', null)
-      const today = new Date().toDateString()
-      setShouldShow(lastDate !== today)
+      try {
+        const lastDate = await getSetting('today_mood_date', null)
+        const today = new Date().toDateString()
+
+        if (!lastDate || lastDate !== today) {
+          setShouldShow(true)
+        } else {
+          setShouldShow(false)
+        }
+      } catch (err) {
+        console.error('Check-in read failed:', err)
+        setShouldShow(true) // fail-safe: show instead of breaking
+      }
     }
-    // Slight delay so app loads first
-    setTimeout(check, 1500)
+
+    setTimeout(check, 800) // slightly faster + safer
   }, [])
 
   return shouldShow
