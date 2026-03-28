@@ -50,7 +50,11 @@ function LoadingScreen() {
 function RequireProfile({ children }) {
   const { profile, loading } = useApp()
   const [onboarded, setOnboarded] = useState(null)
-  useEffect(() => { getSetting('onboarded', false).then(v => setOnboarded(v)) }, [])
+
+  useEffect(() => {
+    getSetting('onboarded', false).then(v => setOnboarded(v))
+  }, [])
+
   if (loading || onboarded === null) return <LoadingScreen/>
   if (!onboarded || !profile) return <Navigate to="/auth" replace/>
   return children
@@ -59,14 +63,30 @@ function RequireProfile({ children }) {
 function HomeWrapper({ children }) {
   const shouldShow = useCheckIn()
   const { profile, setTodayMood } = useApp()
-  const [dismissed, setDismissed] = useState(false)
+
+  // ✅ Persist dismissal across reloads
+  const [dismissed, setDismissed] = useState(() => {
+    return sessionStorage.getItem('checkin_dismissed') === 'true'
+  })
+
+  const handleComplete = (mood) => {
+    setTodayMood(mood?.id)
+
+    // ✅ Persist dismissal
+    sessionStorage.setItem('checkin_dismissed', 'true')
+
+    setDismissed(true)
+  }
+
   return (
     <>
       {children}
+
       {shouldShow && !dismissed && (
         <DailyCheckIn
-          ageGroup={profile?.ageGroup||'explorer'}
-          onComplete={(mood) => { setTodayMood(mood?.id); setDismissed(true) }}
+          key="daily-checkin" // ✅ forces proper unmount
+          ageGroup={profile?.ageGroup || 'explorer'}
+          onComplete={handleComplete}
         />
       )}
     </>
@@ -111,6 +131,7 @@ export default function App() {
           <Route path="/weekly-report" element={<RequireProfile><WeeklyReport /></RequireProfile>} />
           <Route path="*"              element={<Navigate to="/" replace />} />
         </Routes>
+
         <BottomNav />
         <Notification />
         <FloatingReader ageGroup="explorer" hidden={false} />
